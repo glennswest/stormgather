@@ -507,7 +507,9 @@ fn unix_get(_: &Path, _: &str) -> std::io::Result<(u16, Vec<u8>)> {
     Err(std::io::Error::other("host-collect runs on a stormcos node"))
 }
 
-/// Status and body of a raw HTTP/1.x response.
+/// Status and body of a raw HTTP/1.x response. Only the unix socket path
+/// uses it (a Windows laptop has no Cilium socket to read).
+#[cfg_attr(not(unix), allow(dead_code))]
 pub fn parse_response(raw: &[u8]) -> Option<(u16, Vec<u8>)> {
     let end = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
     let head = std::str::from_utf8(&raw[..end]).ok()?;
