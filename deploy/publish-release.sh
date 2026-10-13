@@ -18,9 +18,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
-# Windows (stormcentral#277) and macOS (stormcentral#387)
-# join this list when the build box builds them.
-TARGETS=${TARGETS:-"x86_64-unknown-linux-musl aarch64-unknown-linux-musl"}
+# macOS (stormcentral#387) joins this list when the build box builds it.
+TARGETS=${TARGETS:-"x86_64-unknown-linux-musl aarch64-unknown-linux-musl x86_64-pc-windows-gnu"}
 
 tag=${1:-$(git describe --tags --exact-match HEAD 2>/dev/null || true)}
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "publish-release: give a vX.Y.Z tag (HEAD has none)" >&2; exit 2; }

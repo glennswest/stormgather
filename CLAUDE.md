@@ -38,8 +38,7 @@ Current version: **0.1.0** (no tag cut yet).
   once an issue's work is pushed and sc-build passes.
 - **Laptop binaries**: tag `vX.Y.Z`, push the tag, then
   `deploy/publish-release.sh vX.Y.Z` from a checkout named `stormgather`.
-  Linux x86_64/aarch64 today; Windows waits on stormcentral#277, macOS on
-  stormcentral#387.
+  Linux x86_64/aarch64 and Windows x86_64; macOS waits on stormcentral#387.
 
 ## Users
 

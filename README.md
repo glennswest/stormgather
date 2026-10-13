@@ -22,9 +22,9 @@ sha256sum -c SHA256SUMS --ignore-missing
 chmod +x must-gather-$v-x86_64-unknown-linux-musl
 ```
 
-Linux x86_64 and aarch64 (static musl) today. Windows and macOS are built
-by the same script once the build box can (stormcentral#277,
-stormcentral#387). The component collector scripts ship beside them as
+Linux x86_64 and aarch64 (static musl) and Windows x86_64
+(`must-gather-<v>-x86_64-pc-windows-gnu.exe`). macOS follows when the build
+box has a macOS SDK (stormcentral#387). The component collector scripts ship beside them as
 `gather-<version>.tar.gz` (`--collectors-dir`).
 
 **A golden for the nodes**: `stormcentral component build stormgather`
