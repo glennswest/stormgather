@@ -1,6 +1,6 @@
 [package]
-name = "stormcos-qa-retry"
-description = "stormcos_qa's one retry helper (#57): bounded backoff with jitter under a deadline, attempts logged, infrastructure failures told apart from real answers"
+name = "stormgather-retry"
+description = "One retry helper (stormcos_qa#57): bounded backoff with jitter under a deadline, attempts logged, infrastructure failures told apart from real answers. Used by must-gather and by stormcos_qa's tests"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

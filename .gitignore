@@ -1,0 +1,26 @@
+target/
+/tmp/
+/dist/
+*.tar.gz
+must-gather-*/
+__pycache__/
+*.py[cod]
+
+# Secrets and environment
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+*.log
