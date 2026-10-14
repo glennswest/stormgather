@@ -15,7 +15,7 @@ each [GitHub release](https://github.com/glennswest/stormgather/releases)
 with a `SHA256SUMS`:
 
 ```bash
-v=0.1.0
+v=0.2.0
 curl -LO https://github.com/glennswest/stormgather/releases/download/v$v/must-gather-$v-x86_64-unknown-linux-musl
 curl -LO https://github.com/glennswest/stormgather/releases/download/v$v/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing

@@ -29,7 +29,7 @@ from this repo at the commit its `test/stormgather.rev` names.
 | `CHANGELOG.md` | latest release heading |
 | git tag | `vX.Y.Z` |
 
-Current version: **0.1.0** (tag v0.1.0).
+Current version: **0.2.0** (tag v0.2.0).
 
 ## Shipping
 
@@ -62,7 +62,7 @@ Owner (2026-10-13): "is the shell not rustable?" — stormcos ships no shell.
 
 Design: `collect.rs` built into must-gather, the four `gather/*/status.sh` ported 1:1 (same endpoints, env overrides, summaries: python3's summariser becomes pure functions with unit tests). Node-scoped (`network`, `cadvisor`) → `nodes/<node>/collectors/<area>.txt`; cluster-scoped (`ironprom`, `stormblock-csi`) once → `collectors/<area>.txt`. `--collectors a,b` (default all), `--no-collectors`, `--timeout` per collector. HTTP to node ports through the retry helper (GATHER policy, TLS not verified as `curl -k` did). Removed: `--collectors-dir`, `gather/`, the `gather-<v>.tar.gz` release asset. Breaking → **0.2.0**.
 
-- [ ] collect.rs + tests, main.rs wiring; gather/ removed
-- [ ] README, CHANGELOG, publish-release.sh; sc-build + clippy
+- [x] collect.rs + 6 tests, main.rs wiring; gather/ removed (db1a3bd)
+- [x] README, CHANGELOG, release scripts; sc-build: locked build, 20 + 14 tests, clippy, release binaries linux x86_64/aarch64 + windows (#5 on the way: lock, dead `token_file`)
 - [ ] v0.2.0 tag, release, golden
 - [ ] stormcos_qa: pin v0.2.0; `/test must-gather` wants the collectors' files; live run

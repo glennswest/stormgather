@@ -2,8 +2,18 @@
 
 ## [Unreleased]
 
-### 2026-10-14
+## [v0.2.0] — 2026-10-14
+
+### Breaking
+- The component collectors are built into must-gather (stormcos_qa#68: stormcos ships no shell): `network` and `cadvisor` per node (`nodes/<node>/collectors/<area>.txt`), `ironprom` and `stormblock-csi` once (`collectors/<area>.txt`). The `gather/*/status.sh` scripts, `--collectors-dir` and the `gather-<version>.tar.gz` release asset are gone
+
+### Added
+- `--collectors a,b` (default all), `--no-collectors`; `--timeout` is per collector (120 s)
+
+### Log
 - **BREAKING:** the component collectors are built into must-gather (`collect.rs`, stormcos_qa#68: stormcos ships no shell). `network`, `cadvisor` (per node, `nodes/<node>/collectors/<area>.txt`), `ironprom`, `stormblock-csi` (once, `collectors/<area>.txt`): the same reads, environment overrides and summaries as the `gather/*/status.sh` scripts, which are removed with `--collectors-dir` and the `gather-<version>.tar.gz` release asset. New: `--collectors a,b`, `--no-collectors`; `--timeout` is per collector (120 s)
+- **build:** Cargo.lock without `signal-hook-registry` (tokio `process` no longer used, #5)
+
 
 ## [v0.1.0] — 2026-10-13
 
