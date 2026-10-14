@@ -41,21 +41,21 @@ trap 'git -C "$root" worktree remove --force "$work/stormgather" 2>/dev/null || 
 echo "== building $tag ($TARGETS) on the build box"
 (cd "$work/stormgather" &&
   SC_BUILD_OUT=release.tar SC_BUILD_OUT_TO="$work/release.tar" \
-  sc-build "TARGETS='$TARGETS' deploy/build-release.sh && (cd dist && tar -cf ../release.tar must-gather-* gather-* SHA256SUMS)")
+  sc-build "TARGETS='$TARGETS' deploy/build-release.sh && (cd dist && tar -cf ../release.tar must-gather-* SHA256SUMS)")
 
 mkdir "$work/dist"
 tar -C "$work/dist" -xf "$work/release.tar"
 cd "$work/dist"
 sha256sum -c SHA256SUMS
-assets=(must-gather-"$version"-* gather-"$version".tar.gz)
+assets=(must-gather-"$version"-*)
 expect=$(wc -w <<<"$TARGETS")
-[[ ${#assets[@]} -eq $((expect + 1)) ]] || { echo "publish-release: $expect targets asked for, ${#assets[@]} binaries came back" >&2; exit 1; }
+[[ ${#assets[@]} -eq $expect ]] || { echo "publish-release: $expect targets asked for, ${#assets[@]} binaries came back" >&2; exit 1; }
 
 # The release notes: the tag's section of CHANGELOG.md.
 notes=$work/notes.md
 git -C "$root" show "$tag:CHANGELOG.md" |
   awk -v h="## [$tag]" 'index($0, h) == 1 { on = 1; next } on && /^## \[/ { exit } on' > "$notes"
-printf '\nBinaries: one per OS/arch, checked against `SHA256SUMS` (`sha256sum -c SHA256SUMS --ignore-missing`). Not signed yet. `gather-<version>.tar.gz` holds the collector scripts (`--collectors-dir`).\n' >> "$notes"
+printf '\nBinaries: one per OS/arch, checked against `SHA256SUMS` (`sha256sum -c SHA256SUMS --ignore-missing`). Not signed yet.\n' >> "$notes"
 
 if gh release view "$tag" -R "$repo" >/dev/null 2>&1; then
   echo "== $tag has a release; uploading its assets"

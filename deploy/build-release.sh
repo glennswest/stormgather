@@ -75,9 +75,7 @@ if [[ ${#darwin[@]} -eq 2 ]]; then
     missing+=("universal-apple-darwin (llvm-lipo failed, above)")
   fi
 fi
-# The collector scripts, for --collectors-dir.
-tar -czf "dist/gather-$VERSION.tar.gz" gather
-(cd dist && sha256sum must-gather-* gather-* > SHA256SUMS)
+(cd dist && sha256sum must-gather-* > SHA256SUMS)
 echo "== must-gather $VERSION"
 for b in "${built[@]}"; do
   printf 'built   %s  %s\n' "$(du -h "$b" | cut -f1)" "$b"

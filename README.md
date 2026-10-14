@@ -24,8 +24,8 @@ chmod +x must-gather-$v-x86_64-unknown-linux-musl
 
 Linux x86_64 and aarch64 (static musl) and Windows x86_64
 (`must-gather-<v>-x86_64-pc-windows-gnu.exe`). macOS follows when the build
-box has a macOS SDK (stormcentral#387). The component collector scripts ship beside them as
-`gather-<version>.tar.gz` (`--collectors-dir`).
+box has a macOS SDK (stormcentral#387). The component collectors are built
+in: nothing else to download, and nothing needs a shell (stormcos_qa#68).
 
 **A golden for the nodes**: `stormcentral component build stormgather`
 seals `golden-stormgather-<sha12>` (kind `binaries`, `bin/must-gather`,
@@ -42,7 +42,7 @@ stormpump, not systemd (stormcos_qa#45).
 
 ```
 must-gather --api https://<node>:6443 --token-file <f> [--ca-file <ca> | --insecure] \
-            [--host-image <image>] [--out <dir>] [--nodes <n1,n2>] [--collectors-dir gather]
+            [--host-image <image>] [--out <dir>] [--nodes <n1,n2>] [--collectors <a,b> | --no-collectors]
 ```
 
 | Flag | Default | Effect |
@@ -52,12 +52,13 @@ must-gather --api https://<node>:6443 --token-file <f> [--ca-file <ca> | --insec
 | `--ca-file <f>` (`MUST_GATHER_CA_FILE`) | the pod's ServiceAccount CA | The cluster's CA. |
 | `--insecure` | off | Do not verify the apiserver's certificate. |
 | `--out <dir>` | `must-gather-<unix time>` | Output directory; `<out>.tar.gz` is written next to it. |
-| `--nodes <a,b>` | every node | Nodes for the host part and the collector scripts. |
+| `--nodes <a,b>` | every node | Nodes for the host part and the node-scoped collectors. |
 | `--host-image <ref>` (`MUST_GATHER_HOST_IMAGE`) | — | The image the per-node collector pod runs; it must hold must-gather at `--host-command` (`/must-gather`). Without it the host part is skipped and the manifest says so. The `stormgather` golden holds it at `bin/must-gather`; stormcos_qa's test image also carries it at `/must-gather`. |
 | `--host-namespace <ns>` | a new `must-gather-<run>` | Where the collector pods run. A created namespace is labelled `pod-security.kubernetes.io/enforce=privileged` and deleted afterwards. |
 | `--host-timeout <s>` | `300` | How long a node's collector pod may take. |
-| `--collectors-dir <dir>` | — | Component collector scripts, `<dir>/<area>/*.sh`. |
-| `--timeout <s>` | `60` | Each script's timeout. |
+| `--collectors <a,b>` | all | Component collectors to run: `network`, `cadvisor`, `ironprom`, `stormblock-csi`. An unknown name is refused. |
+| `--no-collectors` | off | Run none. |
+| `--timeout <s>` | `120` | Each collector's timeout. |
 
 **What it collects:**
 
@@ -99,21 +100,23 @@ must-gather --api https://<node>:6443 --token-file <f> [--ca-file <ca> | --insec
   (no spaces, so #136 cannot touch it), checked on arrival. **Secrets stay
   on the node**: keys, tokens, pull secrets and `authorized_keys` are listed
   with their size, never copied.
-- `nodes/<node>/collectors/<area>/<script>.txt`: the component scripts.
+- `nodes/<node>/collectors/<area>.txt` (`network`, `cadvisor`) and
+  `collectors/<area>.txt` (`ironprom`, `stormblock-csi`): the component collectors.
 - `manifest.json`: every item with `ok`, `error` (and why) or `skipped`, and
   the counts. It is written before the tarball, so it is in it (stormcos_qa#13).
 
-**Component collectors** are `gather/<area>/*.sh`, run with `sh` where
-must-gather runs (not on the node), once per node, with `QA_API` (https),
-`QA_TOKEN_FILE`, `QA_CA_FILE`, `QA_INSECURE` (`1`/`0`), `QA_NODE` and
-`QA_NODE_IP` set. Today:
+**Component collectors** are built into must-gather (`collect.rs`; they
+were `gather/<area>/*.sh` shell scripts until 0.2.0, stormcos_qa#68). They
+run where must-gather runs (not on the node), read the cluster API with the
+same credentials, and read a node's own ports over HTTP (retried, TLS not
+verified). A read that fails is written into the text, never fatal.
 
-| Script | Collects |
-|---|---|
-| `gather/cadvisor/status.sh` | cadvisor's `/healthz`, version, attributes, machine, container names, last 100 events, its version/machine metrics and `container_*` series count on `$CADVISOR_ENDPOINT` (default `http://<node>:9096`, optional `CADVISOR_TOKEN`); stormd's `/healthz`, `process="cadvisor"` metrics, `/api/v1/processes/cadvisor` and the last 300 log lines on `$CADVISOR_STORMD` (`:9196`, optional `STORMD_TOKEN`). The cgroup tree and disk map are in the host bundle. Owner: glennswest/cadvisor |
-| `gather/ironprom/status.sh` | through the API: ironprom's pods and StatefulSets in `$IRONPROM_NAMESPACE` (`monitoring`); then, if the pod address is reachable from here, buildinfo, `status/tsdb`, `status/runtimeinfo`, targets, rules and `ironprom_*` self-metrics |
-| `gather/network/status.sh` | the pod network for this node (stormcos_qa#22), through the API: the `Network` CR's status (conditions, `applied*`), the status of `cilium`, `cilium-operator`, `cilium-envoy` (if present) and `network-operator` in `$CILIUM_NAMESPACE` (`kube-system`), `ConfigMap cilium-config` (secret-looking keys redacted; the only ConfigMap must-gather reads), this node's agent pod and the operator pods (phase, ready, restarts, why waiting), the `CiliumNode` (`spec.ipam`, status), the `CiliumEndpoint`s on this node, every `CiliumLoadBalancerIPPool` / `CiliumBGP*` object; then the agent's metrics (`$CILIUM_METRICS`, default `http://<node>:9962/metrics`: unreachable nodes, endpoint states, IPAM, errors). `python3`, if present, summarises the JSON. The agent's own status is in the host bundle (`host/cilium/`), its logs under `logs/kube-system/`. Owner: glennswest/network-operator |
-| `gather/stormblock-csi/status.sh` | through the API: pods in `stormblock-system`, `wanderingvolumes` and `volumepolicies`, the `stormblock-tiebreak` and node leases, `csistoragecapacities` |
+| Collector | Scope | Collects |
+|---|---|---|
+| `network` | per node | the pod network for this node (stormcos_qa#22), through the API: the `Network` CR's status (conditions, `applied*`), the status of `cilium`, `cilium-operator`, `cilium-envoy` (if present) and `network-operator` in `$CILIUM_NAMESPACE` (`kube-system`), `ConfigMap cilium-config` (secret-looking keys redacted; the only ConfigMap must-gather reads), this node's agent pod and the operator pods (phase, ready, restarts, why waiting), the `CiliumNode` (`spec.ipam`, status), the `CiliumEndpoint`s on this node, every `CiliumLoadBalancerIPPool` / `CiliumBGP*` object; then the agent's metrics (`$CILIUM_METRICS`, default `http://<node>:9962/metrics`, `none` skips: unreachable nodes, endpoint states, IPAM, errors). The agent's own status is in the host bundle (`host/cilium/`), its logs under `logs/kube-system/`. Owner: glennswest/network-operator |
+| `cadvisor` | per node | cadvisor's `/healthz`, version, attributes, machine, container names, last 100 events, its version/machine metrics and `container_*` series count on `$CADVISOR_ENDPOINT` (default `http://<node>:9096`, optional `CADVISOR_TOKEN`); stormd's `/healthz`, `process="cadvisor"` metrics, `/api/v1/processes/cadvisor` and the last 300 log lines on `$CADVISOR_STORMD` (`:9196`, `none` skips, optional `STORMD_TOKEN`). The cgroup tree and disk map are in the host bundle. Owner: glennswest/cadvisor |
+| `ironprom` | once | through the API: ironprom's pods and StatefulSets in `$IRONPROM_NAMESPACE` (`monitoring`); then, if the pod address is reachable from here, buildinfo, `status/tsdb`, `status/runtimeinfo`, targets, rules and `ironprom_*` self-metrics. Owner: glennswest/ironprom |
+| `stormblock-csi` | once | through the API: pods in `stormblock-system`, `wanderingvolumes` and `volumepolicies`, the `stormblock-tiebreak` and node leases, `csistoragecapacities`. Owner: glennswest/stormblock-csi |
 
 The old ssh-based `fastetcd`, `kernel` and `stormblock` scripts are gone:
 the host bundle has what they read (fastetcd's metrics and logs, ublk and
@@ -150,9 +153,8 @@ secrets). The recipe is storminstall's and sc's.
 
 | Path | Job |
 |---|---|
-| `crates/must-gather/src/` | `main.rs` CLI, manifest, tarball; `api.rs` TLS client (paged lists); `cluster.rs` API collectors + pod logs; `host.rs` per-node collector pod + `host-collect`; `frame.rs` the base64 frame through a pod log |
+| `crates/must-gather/src/` | `main.rs` CLI, manifest, tarball; `api.rs` TLS client (paged lists); `cluster.rs` API collectors + pod logs; `collect.rs` component collectors; `host.rs` per-node collector pod + `host-collect`; `frame.rs` the base64 frame through a pod log |
 | `crates/retry/src/` | the retry helper (`stormgather-retry`, lib `retry`): `with_backoff`/`probe`, policies, `Infra`; `http.rs` HTTP classification. Also used by stormcos_qa's tests |
-| `gather/<area>/*.sh` | component collector scripts, owned by their components |
 | `deploy/` | release build and publish |
 
 ## History

@@ -11,26 +11,25 @@
 //!   host-collect` from `--host-image`, which sends the node's stormpump and
 //!   service logs, kernel log, pstore, host network, stormblock, fastetcd
 //!   and Cilium agent state back through its pod log (`frame.rs`).
-//! - **collectors**: `gather/<area>/*.sh` scripts that components own, run
-//!   where must-gather runs with `QA_API`, `QA_TOKEN_FILE`, `QA_CA_FILE`,
-//!   `QA_INSECURE`, `QA_NODE` and `QA_NODE_IP` set.
+//! - **collectors** (`collect.rs`): per component, built in (stormcos_qa#68:
+//!   they were shell scripts, and stormcos ships no shell): `network` and
+//!   `cadvisor` per node, `ironprom` and `stormblock-csi` once.
 //!
 //! Output: `<out>/…` with `manifest.json` (every item and its status), then
 //! `<out>.tar.gz` holding all of it, the manifest included (#13).
 
 mod api;
 mod cluster;
+mod collect;
 mod frame;
 mod host;
 
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 use serde_json::Value;
-use tokio::process::Command;
 
 use api::Api;
 
@@ -84,11 +83,15 @@ struct GatherArgs {
     /// How long a node's collector pod may take.
     #[arg(long, default_value_t = 300)]
     host_timeout: u64,
-    /// Component collector scripts: `<dir>/<area>/*.sh`.
+    /// The component collectors to run (default: all of them: network,
+    /// cadvisor, ironprom, stormblock-csi).
+    #[arg(long, value_delimiter = ',')]
+    collectors: Vec<String>,
+    /// Run no component collector.
     #[arg(long)]
-    collectors_dir: Option<PathBuf>,
-    /// Per-script timeout (seconds).
-    #[arg(long, default_value_t = 60)]
+    no_collectors: bool,
+    /// Per-collector timeout (seconds).
+    #[arg(long, default_value_t = 120)]
     timeout: u64,
 }
 
@@ -143,6 +146,9 @@ async fn gather(g: GatherArgs) -> anyhow::Result<()> {
     let started = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
     let run = format!("{:08x}", (started.as_nanos() as u64 ^ (std::process::id() as u64) << 32) as u32);
     let out = g.out.clone().unwrap_or_else(|| PathBuf::from(format!("must-gather-{}", started.as_secs())));
+    if let Some(bad) = g.collectors.iter().find(|c| !collect::known(c)) {
+        anyhow::bail!("--collectors: no collector named {bad} (there are {})", collect::NODE.iter().chain(collect::CLUSTER).copied().collect::<Vec<_>>().join(", "));
+    }
     std::fs::create_dir_all(&out)?;
     let api = Api::new(&g.api, g.token_file.as_deref(), g.ca_file.as_deref(), g.insecure)?;
     let mut items: Vec<Item> = Vec::new();
@@ -193,26 +199,20 @@ async fn gather(g: GatherArgs) -> anyhow::Result<()> {
         Some(_) => items.push(Item::new("nodes/*/host", Status::Skipped, "no nodes to collect from")),
     }
 
-    // Component collector scripts, per node.
-    for (area, script) in discover_collectors(g.collectors_dir.as_deref()) {
+    // Component collectors: cluster-scoped once, node-scoped per node.
+    if !g.no_collectors {
+        let want = |a: &str| g.collectors.is_empty() || g.collectors.iter().any(|c| c == a);
+        let http = collect::node_client()?;
+        let timeout = Duration::from_secs(g.timeout);
+        for area in collect::CLUSTER.iter().filter(|a| want(a)) {
+            eprintln!("must-gather: collector {area}");
+            items.push(run_collector(&api, &http, area, "", "", timeout, &out, format!("collectors/{area}.txt")).await);
+        }
         for (node, ip) in &node_list {
-            let name = script.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let path = format!("nodes/{node}/collectors/{area}/{name}.txt");
-            let target = out.join(&path);
-            let _ = std::fs::create_dir_all(target.parent().unwrap());
-            let mut c = Command::new("sh");
-            c.arg(&script)
-                .env("QA_API", &api.base)
-                .env("QA_TOKEN_FILE", api.token_file().unwrap_or(""))
-                .env("QA_CA_FILE", g.ca_file.as_deref().unwrap_or(""))
-                .env("QA_INSECURE", if g.insecure { "1" } else { "0" })
-                .env("QA_NODE", node)
-                .env("QA_NODE_IP", ip)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            let (st, text) = run_capture(c, g.timeout).await;
-            let _ = std::fs::write(&target, &text);
-            items.push(Item::new(path, st, if st == Status::Ok { String::new() } else { cluster::first_line(&text) }));
+            for area in collect::NODE.iter().filter(|a| want(a)) {
+                eprintln!("must-gather: collector {area} on {node}");
+                items.push(run_collector(&api, &http, area, node, ip, timeout, &out, format!("nodes/{node}/collectors/{area}.txt")).await);
+            }
         }
     }
 
@@ -241,6 +241,22 @@ async fn gather(g: GatherArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// One collector into `<out>/<path>`, bounded by `timeout`.
+#[allow(clippy::too_many_arguments)]
+async fn run_collector(api: &Api, http: &reqwest::Client, area: &str, node: &str, ip: &str, timeout: Duration, out: &Path, path: String) -> Item {
+    let ctx = collect::Ctx { api, http: http.clone(), node, node_ip: ip };
+    let (st, text) = match tokio::time::timeout(timeout, collect::run(area, &ctx)).await {
+        Ok(t) => (Status::Ok, t),
+        Err(_) => (Status::Error, format!("(collector {area} timed out after {}s)\n", timeout.as_secs())),
+    };
+    let target = out.join(&path);
+    if let Some(dir) = target.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&target, &text);
+    Item::new(path, st, if st == Status::Ok { String::new() } else { cluster::first_line(&text) })
+}
+
 /// `<out>.tar.gz` holding `<out>/` under its own name (no `tar` program
 /// needed: a Windows workstation has none).
 fn write_tarball(out: &Path, tarball: &str) -> anyhow::Result<()> {
@@ -250,43 +266,6 @@ fn write_tarball(out: &Path, tarball: &str) -> anyhow::Result<()> {
     t.append_dir_all(&name, out)?;
     t.into_inner()?.finish()?;
     Ok(())
-}
-
-async fn run_capture(mut c: Command, timeout: u64) -> (Status, String) {
-    match tokio::time::timeout(Duration::from_secs(timeout), c.output()).await {
-        Ok(Ok(o)) => {
-            let mut s = String::from_utf8_lossy(&o.stdout).to_string();
-            let e = String::from_utf8_lossy(&o.stderr);
-            if !e.trim().is_empty() {
-                s.push_str("\n--- stderr ---\n");
-                s.push_str(&e);
-            }
-            (if o.status.success() { Status::Ok } else { Status::Error }, s)
-        }
-        Ok(Err(e)) => (Status::Error, format!("(collector could not start: {e}; it needs `sh`)")),
-        Err(_) => (Status::Error, "(collector timed out)".into()),
-    }
-}
-
-/// `<dir>/<area>/*.sh`, sorted.
-fn discover_collectors(dir: Option<&Path>) -> Vec<(String, PathBuf)> {
-    let Some(dir) = dir else { return vec![] };
-    let mut out = Vec::new();
-    for a in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let ap = a.path();
-        if !ap.is_dir() {
-            continue;
-        }
-        let area = ap.file_name().unwrap_or_default().to_string_lossy().to_string();
-        for f in std::fs::read_dir(&ap).into_iter().flatten().flatten() {
-            let p = f.path();
-            if p.is_file() && p.extension().is_some_and(|e| e == "sh") {
-                out.push((area.clone(), p));
-            }
-        }
-    }
-    out.sort();
-    out
 }
 
 #[cfg(test)]
@@ -306,16 +285,6 @@ mod tests {
         let names: Vec<String> = ar.entries().unwrap().map(|e| e.unwrap().path().unwrap().to_string_lossy().to_string()).collect();
         assert!(names.iter().any(|n| n == "must-gather-1/manifest.json"), "{names:?}");
         assert!(names.iter().any(|n| n == "must-gather-1/cluster/nodes.json"), "{names:?}");
-        let _ = std::fs::remove_dir_all(&t);
-    }
-
-    #[test]
-    fn collectors_are_sh_scripts_by_area() {
-        let t = std::env::temp_dir().join(format!("mg-col-{}", std::process::id()));
-        std::fs::create_dir_all(t.join("ironprom")).unwrap();
-        std::fs::write(t.join("ironprom/status.sh"), "echo hi").unwrap();
-        std::fs::write(t.join("ironprom/README"), "no").unwrap();
-        assert_eq!(discover_collectors(Some(&t)), vec![("ironprom".to_string(), t.join("ironprom/status.sh"))]);
         let _ = std::fs::remove_dir_all(&t);
     }
 
