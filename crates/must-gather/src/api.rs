@@ -62,10 +62,6 @@ impl Api {
         Ok(Api { base, token_file, http: b.build()? })
     }
 
-    pub fn token_file(&self) -> Option<&str> {
-        self.token_file.as_deref()
-    }
-
     fn auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         // Re-read every time: bound ServiceAccount tokens rotate in place.
         match self.token_file.as_ref().and_then(|f| std::fs::read_to_string(f).ok()) {
