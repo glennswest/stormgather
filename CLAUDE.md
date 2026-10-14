@@ -64,5 +64,6 @@ Design: `collect.rs` built into must-gather, the four `gather/*/status.sh` porte
 
 - [x] collect.rs + 6 tests, main.rs wiring; gather/ removed (db1a3bd)
 - [x] README, CHANGELOG, release scripts; sc-build: locked build, 20 + 14 tests, clippy, release binaries linux x86_64/aarch64 + windows (#5 on the way: lock, dead `token_file`)
-- [ ] v0.2.0 tag, release, golden
-- [ ] stormcos_qa: pin v0.2.0; `/test must-gather` wants the collectors' files; live run
+- [x] v0.2.0 tag (ec725cc) + GitHub release (linux x86_64/aarch64, windows), downloaded back: sha OK, `--version` 0.2.0
+- [ ] golden: built + tested, failed at `sc-build-out open` (stormcentral#841, every golden); request again once fixed
+- [x] stormcos_qa pins ec725cc; `/test must-gather` checks the collectors' files; live run 1fc9fa03c2 queued (pvetest2)
